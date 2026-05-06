@@ -5,50 +5,49 @@ import streamlit as st
 import plotly.express as px
 
 # --- [1] 기본 설정 ---
-st.set_page_config(page_title="공공 자전거 대시보드", layout="wide")
-st.title("🚲 공공 자전거 데이터 분석 대시보드")
-st.markdown("SQLite 데이터베이스와 Streamlit을 활용해 만든 첫 번째 대시보드입니다!")
+st.set_page_config(page_title="자치구별 따릉이 경영 분석", layout="wide")
+st.title("🚲 자치구별 공공 자전거 이용 패턴 분석")
+st.markdown("자치구별 이용 차이를 분석하여 **자산 최적화** 및 **ESG 경영** 인사이트를 도출합니다.")
 
 # --- [2] 데이터베이스 확인 및 에러 처리 ---
 DB_PATH = 'bicycle.db'
 
-# bicycle.db 파일이 같은 폴더에 없으면 친절한 에러 메시지를 띄우고 멈춥니다.
 if not os.path.exists(DB_PATH):
-    st.error("🚨 앗! 데이터베이스 파일(`bicycle.db`)을 찾을 수 없어요!\n\n`app.py` 파일과 같은 폴더에 `bicycle.db` 파일이 있는지 꼭 확인해 주세요 🥺")
+    st.error("🚨 `bicycle.db` 파일을 찾을 수 없어요! 파일 위치를 확인해 주세요.")
     st.stop()
 
 # --- [3] 데이터 불러오기 함수 ---
-# @st.cache_data는 데이터를 한 번만 불러와서 기억해두는 기능이에요. (속도 향상!)
 @st.cache_data
 def load_data(query):
-    conn = sqlite3.connect(DB_PATH) # DB 연결
-    df = pd.read_sql_query(query, conn) # SQL 쿼리로 데이터 가져와서 표(DataFrame)로 만들기
-    conn.close() # DB 연결 종료
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(query, conn)
+    conn.close()
     return df
 
-st.divider() # 구분선
+st.divider()
 
 # ==========================================
-# 📊 첫 번째 차트: 월별 이용 패턴 (라인 차트)
+# 📊 분석 1: 자치구별 이용 효율성 (자산 최적화)
 # ==========================================
-st.header("1. 월별 이용 패턴 📈")
+st.header("1. 자치구별 이용 건수 및 효율성 분석 🏢")
+st.info("💡 **경영 인사이트:** 이용 건수가 특정 구에 편중되어 있다면, 자전거 재배치(Logistics) 우선순위를 조정하여 유휴 자산을 줄이고 회전율을 높여야 합니다.")
+
 query1 = """
 SELECT 
-    대여일자, 
-    SUM(이용건수) AS 총이용건수
-FROM 이용정보
-GROUP BY 대여일자
-ORDER BY 대여일자
+    B.자치구, 
+    SUM(A.이용건수) AS 총이용건수
+FROM 이용정보 A
+JOIN 대여소 B ON A.대여소번호 = B.대여소번호
+GROUP BY B.자치구
+ORDER BY 총이용건수 DESC
 """
 df1 = load_data(query1)
 
-# 화면을 반으로 나누어 왼쪽엔 차트, 오른쪽엔 SQL을 보여줍니다.
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("① 시각화")
-    # Plotly를 이용해 라인 차트를 그립니다.
-    fig1 = px.line(df1, x='대여일자', y='총이용건수', markers=True, title="월별 총 이용건수")
+    fig1 = px.pie(df1, values='총이용건수', names='자치구', title="자치구별 이용 비중", hole=0.3)
     st.plotly_chart(fig1, use_container_width=True)
 
 with col2:
@@ -58,18 +57,20 @@ with col2:
 st.divider()
 
 # ==========================================
-# 📊 두 번째 차트: 기온별 평균 이용량 (막대 차트)
+# 📊 분석 2: 자치구별 이용 페르소나 (마케팅 전략)
 # ==========================================
-st.header("2. 기온별 평균 이용량 🌡️")
+st.header("2. 이동거리 vs 이용시간 상관분석 🗺️")
+st.info("💡 **경영 인사이트:** 평균 이동거리가 길면 '레저형', 짧으면 '통근/단거리 이동형'으로 분류합니다. 지역 특성에 맞춘 차별화된 마케팅 메시지가 필요합니다.")
+
 query2 = """
 SELECT 
-    CAST(B.평균기온 / 5 AS INTEGER) * 5 || '도 구간' AS 기온구간,
-    CAST(B.평균기온 / 5 AS INTEGER) * 5 AS 정렬용_기온,
-    AVG(A.이용건수) AS 평균이용건수
+    B.자치구, 
+    AVG(A.이동거리) AS 평균이동거리, 
+    AVG(A.이용시간) AS 평균이용시간,
+    SUM(A.이용건수) AS 총이용건수
 FROM 이용정보 A
-JOIN 기온 B ON A.대여일자 = B.년월
-GROUP BY 기온구간, 정렬용_기온
-ORDER BY 정렬용_기온
+JOIN 대여소 B ON A.대여소번호 = B.대여소번호
+GROUP BY B.자치구
 """
 df2 = load_data(query2)
 
@@ -77,7 +78,11 @@ col3, col4 = st.columns([1, 1])
 
 with col3:
     st.subheader("① 시각화")
-    fig2 = px.bar(df2, x='기온구간', y='평균이용건수', title="기온 5도 구간별 평균 이용건수")
+    # 자치구별 특성을 한눈에 보는 버블 차트
+    fig2 = px.scatter(df2, x="평균이동거리", y="평균이용시간", 
+                 size="총이용건수", color="자치구",
+                 hover_name="자치구", title="자치구별 이용 성격(레저 vs 통근)",
+                 labels={"평균이동거리": "평균 이동거리(m)", "평균이용시간": "평균 이용시간(분)"})
     st.plotly_chart(fig2, use_container_width=True)
 
 with col4:
@@ -87,28 +92,29 @@ with col4:
 st.divider()
 
 # ==========================================
-# 📊 세 번째 차트: 인기 대여소 TOP 10 (가로 막대 차트)
+# 📊 분석 3: 자치구별 ESG 기여도 (지속가능경영)
 # ==========================================
-st.header("3. 인기 대여소 TOP 10 🏆")
+st.header("3. 자치구별 탄소 절감 성과 🌿")
+st.info("💡 **경영 인사이트:** 각 자치구의 탄소 절감량을 수치화하여 지자체 협력 사업의 근거로 활용하거나 ESG 경영 보고서의 핵심 지표로 사용할 수 있습니다.")
+
 query3 = """
 SELECT 
-    B.보관소명,
-    SUM(A.이용건수) AS 총이용건수
+    B.자치구, 
+    SUM(A.탄소량) AS 총탄소절감량
 FROM 이용정보 A
 JOIN 대여소 B ON A.대여소번호 = B.대여소번호
-GROUP BY B.대여소번호, B.보관소명
-ORDER BY 총이용건수 DESC
-LIMIT 10
+GROUP BY B.자치구
+ORDER BY 총탄소절감량 ASC
 """
 df3 = load_data(query3)
-# 가로 막대 차트에서 1등이 가장 위에 오도록 데이터를 뒤집어줍니다.
-df3 = df3.sort_values(by='총이용건수', ascending=True)
 
 col5, col6 = st.columns([1, 1])
 
 with col5:
     st.subheader("① 시각화")
-    fig3 = px.bar(df3, x='총이용건수', y='보관소명', orientation='h', title="총 이용건수 상위 10개 대여소")
+    fig3 = px.bar(df3, x='총탄소절감량', y='자치구', orientation='h', 
+             title="자치구별 누적 탄소 절감량",
+             color='총탄소절감량', color_continuous_scale='Greens')
     st.plotly_chart(fig3, use_container_width=True)
 
 with col6:
